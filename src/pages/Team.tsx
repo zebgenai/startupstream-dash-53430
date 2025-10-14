@@ -19,6 +19,20 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { z } from 'zod';
+
+const userInviteSchema = z.object({
+  email: z.string().email('Invalid email address').max(255),
+  password: z.string()
+    .min(8, 'Password must be at least 8 characters')
+    .max(100, 'Password too long'),
+  full_name: z.string()
+    .trim()
+    .min(1, 'Name is required')
+    .max(100, 'Name too long')
+    .regex(/^[a-zA-Z\s'-]+$/, 'Invalid characters in name'),
+  role: z.enum(['admin', 'member']),
+});
 
 interface UserWithRole {
   id: string;
@@ -52,56 +66,19 @@ export default function Team() {
 
   const fetchUsers = async () => {
     try {
-      const { data: profiles, error: profilesError } = await supabase
-        .from('profiles')
-        .select('id, full_name, created_at');
+      const { data, error } = await supabase.functions.invoke('manage-users', {
+        body: { action: 'listUsers' },
+      });
 
-      if (profilesError) throw profilesError;
+      if (error) throw error;
 
-      const { data: roles, error: rolesError } = await supabase
-        .from('user_roles')
-        .select('user_id, role');
-
-      if (rolesError) throw rolesError;
-
-      // Get user emails from auth metadata (admin only can access this through edge function)
-      const usersWithRoles = await Promise.all(
-        profiles.map(async (profile) => {
-          const role = roles.find((r) => r.user_id === profile.id);
-          
-          // Fetch email through Supabase admin API
-          const { data: authData } = await supabase.auth.admin.getUserById(profile.id);
-          
-          return {
-            ...profile,
-            email: authData?.user?.email || 'N/A',
-            role: role?.role || 'member',
-          };
-        })
-      );
-
-      setUsers(usersWithRoles);
+      setUsers(data.users);
     } catch (error: any) {
-      // If admin API fails, just show profiles without emails
-      const { data: profiles } = await supabase
-        .from('profiles')
-        .select('id, full_name, created_at');
-
-      const { data: roles } = await supabase
-        .from('user_roles')
-        .select('user_id, role');
-
-      if (profiles) {
-        const usersWithRoles = profiles.map((profile) => {
-          const role = roles?.find((r) => r.user_id === profile.id);
-          return {
-            ...profile,
-            email: 'Hidden',
-            role: role?.role || 'member',
-          };
-        });
-        setUsers(usersWithRoles);
-      }
+      toast({
+        title: 'Error',
+        description: 'Failed to fetch users: ' + error.message,
+        variant: 'destructive',
+      });
     } finally {
       setLoading(false);
     }
@@ -109,14 +86,26 @@ export default function Team() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
     try {
+      // Validate input
+      const validation = userInviteSchema.safeParse(formData);
+      if (!validation.success) {
+        toast({
+          title: 'Validation Error',
+          description: validation.error.errors[0].message,
+          variant: 'destructive',
+        });
+        return;
+      }
+
       // Create user account
       const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: formData.email,
-        password: formData.password,
+        email: validation.data.email,
+        password: validation.data.password,
         options: {
           data: {
-            full_name: formData.full_name,
+            full_name: validation.data.full_name,
           },
           emailRedirectTo: `${window.location.origin}/dashboard`,
         },
@@ -126,10 +115,10 @@ export default function Team() {
 
       if (authData.user) {
         // Update role if not member (default is member via trigger)
-        if (formData.role === 'admin') {
+        if (validation.data.role === 'admin') {
           const { error: roleError } = await supabase
             .from('user_roles')
-            .update({ role: formData.role })
+            .update({ role: validation.data.role })
             .eq('user_id', authData.user.id);
 
           if (roleError) throw roleError;
@@ -186,9 +175,9 @@ export default function Team() {
     if (!selectedUserId) return;
 
     try {
-      // Note: Deleting from auth.users requires admin privileges
-      // In production, this should be done via an edge function
-      const { error } = await supabase.auth.admin.deleteUser(selectedUserId);
+      const { data, error } = await supabase.functions.invoke('manage-users', {
+        body: { action: 'deleteUser', userId: selectedUserId },
+      });
 
       if (error) throw error;
 
@@ -203,7 +192,7 @@ export default function Team() {
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: 'Unable to delete user. This requires admin privileges.',
+        description: 'Unable to delete user: ' + error.message,
         variant: 'destructive',
       });
     }
@@ -270,11 +259,11 @@ export default function Team() {
               />
               <Input
                 type="password"
-                placeholder="Temporary Password"
+                placeholder="Temporary Password (min 8 characters)"
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                 required
-                minLength={6}
+                minLength={8}
               />
               <Select
                 value={formData.role}
