@@ -7,7 +7,9 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { Plus } from 'lucide-react';
+import { Plus, MoreVertical, Pencil, Trash2 } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { useAuth } from '@/lib/auth';
 import { Badge } from '@/components/ui/badge';
 
@@ -26,6 +28,8 @@ export default function Tasks() {
   const [projects, setProjects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [deletingTask, setDeletingTask] = useState<Task | null>(null);
   const { isAdmin, user } = useAuth();
   const { toast } = useToast();
 
@@ -70,22 +74,39 @@ export default function Tasks() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const { error } = await supabase.from('tasks').insert([
-        {
-          ...formData,
-          created_by: user?.id,
-          assigned_to: user?.id,
-        },
-      ]);
+      if (editingTask) {
+        const { error } = await supabase
+          .from('tasks')
+          .update({
+            ...formData,
+          })
+          .eq('id', editingTask.id);
 
-      if (error) throw error;
+        if (error) throw error;
 
-      toast({
-        title: 'Success',
-        description: 'Task created successfully',
-      });
+        toast({
+          title: 'Success',
+          description: 'Task updated successfully',
+        });
+      } else {
+        const { error } = await supabase.from('tasks').insert([
+          {
+            ...formData,
+            created_by: user?.id,
+            assigned_to: user?.id,
+          },
+        ]);
+
+        if (error) throw error;
+
+        toast({
+          title: 'Success',
+          description: 'Task created successfully',
+        });
+      }
 
       setOpen(false);
+      setEditingTask(null);
       setFormData({
         title: '',
         description: '',
@@ -93,6 +114,45 @@ export default function Tasks() {
         deadline: '',
         status: 'todo',
       });
+      fetchTasks();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message,
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleEdit = (task: Task) => {
+    setEditingTask(task);
+    setFormData({
+      title: task.title,
+      description: task.description || '',
+      project_id: task.project_id || '',
+      deadline: task.deadline || '',
+      status: task.status as 'todo' | 'in_progress' | 'done',
+    });
+    setOpen(true);
+  };
+
+  const handleDelete = async () => {
+    if (!deletingTask) return;
+    
+    try {
+      const { error } = await supabase
+        .from('tasks')
+        .delete()
+        .eq('id', deletingTask.id);
+
+      if (error) throw error;
+
+      toast({
+        title: 'Success',
+        description: 'Task deleted successfully',
+      });
+
+      setDeletingTask(null);
       fetchTasks();
     } catch (error: any) {
       toast({
@@ -168,10 +228,10 @@ export default function Tasks() {
               New Task
             </Button>
           </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Create New Task</DialogTitle>
-            </DialogHeader>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>{editingTask ? 'Edit Task' : 'Create New Task'}</DialogTitle>
+              </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
               <Input
                 placeholder="Task Title"
@@ -205,7 +265,7 @@ export default function Tasks() {
                 onChange={(e) => setFormData({ ...formData, deadline: e.target.value })}
               />
               <Button type="submit" className="w-full btn-primary">
-                Create Task
+                {editingTask ? 'Update Task' : 'Create Task'}
               </Button>
             </form>
           </DialogContent>
@@ -227,7 +287,29 @@ export default function Tasks() {
               {groupedTasks[status].map((task) => (
                 <Card key={task.id} className="bg-secondary/50">
                   <CardContent className="p-4 space-y-2">
-                    <h3 className="font-medium">{task.title}</h3>
+                    <div className="flex justify-between items-start">
+                      <h3 className="font-medium">{task.title}</h3>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-6 w-6">
+                            <MoreVertical className="h-3 w-3" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handleEdit(task)}>
+                            <Pencil className="h-4 w-4 mr-2" />
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem 
+                            onClick={() => setDeletingTask(task)}
+                            className="text-destructive"
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                     <p className="text-xs text-muted-foreground line-clamp-2">
                       {task.description}
                     </p>
@@ -264,6 +346,23 @@ export default function Tasks() {
           </Card>
         ))}
       </div>
+
+      <AlertDialog open={!!deletingTask} onOpenChange={(open) => !open && setDeletingTask(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Task</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{deletingTask?.title}"? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

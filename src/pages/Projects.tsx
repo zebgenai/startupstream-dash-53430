@@ -7,7 +7,9 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { Plus, Search } from 'lucide-react';
+import { Plus, Search, MoreVertical, Pencil, Trash2 } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { useAuth } from '@/lib/auth';
 import { Badge } from '@/components/ui/badge';
 
@@ -28,6 +30,8 @@ export default function Projects() {
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [deletingProject, setDeletingProject] = useState<Project | null>(null);
   const { isAdmin, user } = useAuth();
   const { toast } = useToast();
 
@@ -84,31 +88,58 @@ export default function Projects() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const { error } = await supabase.from('projects').insert([
-        {
-          name: formData.name,
-          description: formData.description,
-          deliverables: formData.deliverables,
-          start_date: formData.start_date,
-          deadline: formData.deadline,
-          status: formData.status,
-          client_name: formData.client_name || null,
-          client_email: formData.client_email || null,
-          client_phone: formData.client_phone || null,
-          total_amount: formData.total_amount ? parseFloat(formData.total_amount) : 0,
-          amount_paid: formData.amount_paid ? parseFloat(formData.amount_paid) : 0,
-          created_by: user?.id,
-        },
-      ]);
+      if (editingProject) {
+        const { error } = await supabase
+          .from('projects')
+          .update({
+            name: formData.name,
+            description: formData.description,
+            deliverables: formData.deliverables,
+            start_date: formData.start_date,
+            deadline: formData.deadline,
+            status: formData.status,
+            client_name: formData.client_name || null,
+            client_email: formData.client_email || null,
+            client_phone: formData.client_phone || null,
+            total_amount: formData.total_amount ? parseFloat(formData.total_amount) : 0,
+            amount_paid: formData.amount_paid ? parseFloat(formData.amount_paid) : 0,
+          })
+          .eq('id', editingProject.id);
 
-      if (error) throw error;
+        if (error) throw error;
 
-      toast({
-        title: 'Success',
-        description: 'Project created successfully',
-      });
+        toast({
+          title: 'Success',
+          description: 'Project updated successfully',
+        });
+      } else {
+        const { error } = await supabase.from('projects').insert([
+          {
+            name: formData.name,
+            description: formData.description,
+            deliverables: formData.deliverables,
+            start_date: formData.start_date,
+            deadline: formData.deadline,
+            status: formData.status,
+            client_name: formData.client_name || null,
+            client_email: formData.client_email || null,
+            client_phone: formData.client_phone || null,
+            total_amount: formData.total_amount ? parseFloat(formData.total_amount) : 0,
+            amount_paid: formData.amount_paid ? parseFloat(formData.amount_paid) : 0,
+            created_by: user?.id,
+          },
+        ]);
+
+        if (error) throw error;
+
+        toast({
+          title: 'Success',
+          description: 'Project created successfully',
+        });
+      }
 
       setOpen(false);
+      setEditingProject(null);
       setFormData({
         name: '',
         description: '',
@@ -122,6 +153,51 @@ export default function Projects() {
         total_amount: '',
         amount_paid: '',
       });
+      fetchProjects();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message,
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleEdit = (project: any) => {
+    setEditingProject(project);
+    setFormData({
+      name: project.name,
+      description: project.description || '',
+      deliverables: project.deliverables || '',
+      start_date: project.start_date,
+      deadline: project.deadline,
+      status: project.status,
+      client_name: project.client_name || '',
+      client_email: project.client_email || '',
+      client_phone: project.client_phone || '',
+      total_amount: project.total_amount?.toString() || '',
+      amount_paid: project.amount_paid?.toString() || '',
+    });
+    setOpen(true);
+  };
+
+  const handleDelete = async () => {
+    if (!deletingProject) return;
+    
+    try {
+      const { error } = await supabase
+        .from('projects')
+        .delete()
+        .eq('id', deletingProject.id);
+
+      if (error) throw error;
+
+      toast({
+        title: 'Success',
+        description: 'Project deleted successfully',
+      });
+
+      setDeletingProject(null);
       fetchProjects();
     } catch (error: any) {
       toast({
@@ -170,7 +246,7 @@ export default function Projects() {
             </DialogTrigger>
             <DialogContent className="max-w-2xl">
               <DialogHeader>
-                <DialogTitle>Create New Project</DialogTitle>
+                <DialogTitle>{editingProject ? 'Edit Project' : 'Create New Project'}</DialogTitle>
               </DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <Input
@@ -257,7 +333,7 @@ export default function Projects() {
                 </div>
                 
                 <Button type="submit" className="w-full btn-primary">
-                  Create Project
+                  {editingProject ? 'Update Project' : 'Create Project'}
                 </Button>
               </form>
             </DialogContent>
@@ -281,9 +357,33 @@ export default function Projects() {
             <CardHeader>
               <div className="flex justify-between items-start">
                 <CardTitle className="text-lg">{project.name}</CardTitle>
-                <Badge className={getStatusColor(project.status)}>
-                  {project.status}
-                </Badge>
+                <div className="flex items-center gap-2">
+                  <Badge className={getStatusColor(project.status)}>
+                    {project.status}
+                  </Badge>
+                  {isAdmin && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => handleEdit(project)}>
+                          <Pencil className="h-4 w-4 mr-2" />
+                          Edit
+                        </DropdownMenuItem>
+                        <DropdownMenuItem 
+                          onClick={() => setDeletingProject(project)}
+                          className="text-destructive"
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                </div>
               </div>
             </CardHeader>
             <CardContent className="space-y-2">
@@ -355,6 +455,23 @@ export default function Projects() {
           </DialogContent>
         </Dialog>
       )}
+
+      <AlertDialog open={!!deletingProject} onOpenChange={(open) => !open && setDeletingProject(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Project</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{deletingProject?.name}"? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

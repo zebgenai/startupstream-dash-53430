@@ -7,7 +7,10 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { Plus } from 'lucide-react';
+import { Plus, MoreVertical, Pencil, Trash2 } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { Button as UIButton } from '@/components/ui/button';
 import { useAuth } from '@/lib/auth';
 import {
   Table,
@@ -35,6 +38,8 @@ export default function Finance() {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [dateFilter, setDateFilter] = useState<'all' | 'daily' | 'weekly' | 'monthly'>('all');
+  const [editingRecord, setEditingRecord] = useState<FinanceRecord | null>(null);
+  const [deletingRecord, setDeletingRecord] = useState<FinanceRecord | null>(null);
   const { user } = useAuth();
   const { toast } = useToast();
 
@@ -94,22 +99,43 @@ export default function Finance() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const { error } = await supabase.from('finance_records').insert([
-        {
-          ...formData,
-          amount: parseFloat(formData.amount),
-          created_by: user?.id,
-        },
-      ]);
+      if (editingRecord) {
+        const { error } = await supabase
+          .from('finance_records')
+          .update({
+            type: formData.type,
+            amount: parseFloat(formData.amount),
+            description: formData.description,
+            project_id: formData.project_id,
+            date: formData.date,
+          })
+          .eq('id', editingRecord.id);
 
-      if (error) throw error;
+        if (error) throw error;
 
-      toast({
-        title: 'Success',
-        description: 'Finance record added successfully',
-      });
+        toast({
+          title: 'Success',
+          description: 'Finance record updated successfully',
+        });
+      } else {
+        const { error } = await supabase.from('finance_records').insert([
+          {
+            ...formData,
+            amount: parseFloat(formData.amount),
+            created_by: user?.id,
+          },
+        ]);
+
+        if (error) throw error;
+
+        toast({
+          title: 'Success',
+          description: 'Finance record added successfully',
+        });
+      }
 
       setOpen(false);
+      setEditingRecord(null);
       setFormData({
         type: 'income',
         amount: '',
@@ -117,6 +143,45 @@ export default function Finance() {
         project_id: '',
         date: new Date().toISOString().split('T')[0],
       });
+      fetchRecords();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message,
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleEdit = (record: FinanceRecord) => {
+    setEditingRecord(record);
+    setFormData({
+      type: record.type as 'income' | 'expense',
+      amount: record.amount.toString(),
+      description: record.description || '',
+      project_id: record.project_id,
+      date: record.date,
+    });
+    setOpen(true);
+  };
+
+  const handleDelete = async () => {
+    if (!deletingRecord) return;
+    
+    try {
+      const { error } = await supabase
+        .from('finance_records')
+        .delete()
+        .eq('id', deletingRecord.id);
+
+      if (error) throw error;
+
+      toast({
+        title: 'Success',
+        description: 'Finance record deleted successfully',
+      });
+
+      setDeletingRecord(null);
       fetchRecords();
     } catch (error: any) {
       toast({
@@ -177,7 +242,7 @@ export default function Finance() {
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Add Finance Record</DialogTitle>
+                <DialogTitle>{editingRecord ? 'Edit Finance Record' : 'Add Finance Record'}</DialogTitle>
               </DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <Select
@@ -227,7 +292,7 @@ export default function Finance() {
                   required
                 />
                 <Button type="submit" className="w-full btn-primary">
-                  Add Record
+                  {editingRecord ? 'Update Record' : 'Add Record'}
                 </Button>
               </form>
             </DialogContent>
@@ -279,6 +344,7 @@ export default function Finance() {
                 <TableHead>Type</TableHead>
                 <TableHead>Description</TableHead>
                 <TableHead className="text-right">Amount</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -303,12 +369,51 @@ export default function Finance() {
                   }`}>
                     {record.type === 'income' ? '+' : '-'}${Number(record.amount).toFixed(2)}
                   </TableCell>
+                  <TableCell className="text-right">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <UIButton variant="ghost" size="icon" className="h-8 w-8">
+                          <MoreVertical className="h-4 w-4" />
+                        </UIButton>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => handleEdit(record)}>
+                          <Pencil className="h-4 w-4 mr-2" />
+                          Edit
+                        </DropdownMenuItem>
+                        <DropdownMenuItem 
+                          onClick={() => setDeletingRecord(record)}
+                          className="text-destructive"
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
+
+      <AlertDialog open={!!deletingRecord} onOpenChange={(open) => !open && setDeletingRecord(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Finance Record</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this record? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

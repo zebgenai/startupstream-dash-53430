@@ -5,7 +5,9 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { Plus } from 'lucide-react';
+import { Plus, MoreVertical, Pencil, Trash2 } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { useAuth } from '@/lib/auth';
 
 interface Note {
@@ -20,6 +22,8 @@ export default function Notes() {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [content, setContent] = useState('');
+  const [editingNote, setEditingNote] = useState<Note | null>(null);
+  const [deletingNote, setDeletingNote] = useState<Note | null>(null);
   const { user } = useAuth();
   const { toast } = useToast();
 
@@ -60,22 +64,70 @@ export default function Notes() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const { error } = await supabase.from('notes').insert([
-        {
-          content,
-          created_by: user?.id,
-        },
-      ]);
+      if (editingNote) {
+        const { error } = await supabase
+          .from('notes')
+          .update({ content })
+          .eq('id', editingNote.id);
+
+        if (error) throw error;
+
+        toast({
+          title: 'Success',
+          description: 'Note updated successfully',
+        });
+      } else {
+        const { error } = await supabase.from('notes').insert([
+          {
+            content,
+            created_by: user?.id,
+          },
+        ]);
+
+        if (error) throw error;
+
+        toast({
+          title: 'Success',
+          description: 'Note created successfully',
+        });
+      }
+
+      setOpen(false);
+      setContent('');
+      setEditingNote(null);
+      fetchNotes();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message,
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleEdit = (note: Note) => {
+    setEditingNote(note);
+    setContent(note.content);
+    setOpen(true);
+  };
+
+  const handleDelete = async () => {
+    if (!deletingNote) return;
+    
+    try {
+      const { error } = await supabase
+        .from('notes')
+        .delete()
+        .eq('id', deletingNote.id);
 
       if (error) throw error;
 
       toast({
         title: 'Success',
-        description: 'Note created successfully',
+        description: 'Note deleted successfully',
       });
 
-      setOpen(false);
-      setContent('');
+      setDeletingNote(null);
       fetchNotes();
     } catch (error: any) {
       toast({
@@ -110,7 +162,7 @@ export default function Notes() {
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Create New Note</DialogTitle>
+              <DialogTitle>{editingNote ? 'Edit Note' : 'Create New Note'}</DialogTitle>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
               <Textarea
@@ -121,7 +173,7 @@ export default function Notes() {
                 rows={6}
               />
               <Button type="submit" className="w-full btn-primary">
-                Create Note
+                {editingNote ? 'Update Note' : 'Create Note'}
               </Button>
             </form>
           </DialogContent>
@@ -132,7 +184,29 @@ export default function Notes() {
         {notes.map((note) => (
           <Card key={note.id} className="card-elegant">
             <CardContent className="p-4 space-y-3">
-              <p className="text-sm whitespace-pre-wrap">{note.content}</p>
+              <div className="flex justify-between items-start gap-2">
+                <p className="text-sm whitespace-pre-wrap flex-1">{note.content}</p>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-6 w-6 flex-shrink-0">
+                      <MoreVertical className="h-3 w-3" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => handleEdit(note)}>
+                      <Pencil className="h-4 w-4 mr-2" />
+                      Edit
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      onClick={() => setDeletingNote(note)}
+                      className="text-destructive"
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
               <div className="flex justify-between items-center text-xs text-muted-foreground">
                 <span>{note.profiles?.full_name || 'Unknown'}</span>
                 <span>{new Date(note.created_at).toLocaleDateString()}</span>
@@ -147,6 +221,23 @@ export default function Notes() {
           <p className="text-muted-foreground">No notes yet</p>
         </div>
       )}
+
+      <AlertDialog open={!!deletingNote} onOpenChange={(open) => !open && setDeletingNote(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Note</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this note? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
